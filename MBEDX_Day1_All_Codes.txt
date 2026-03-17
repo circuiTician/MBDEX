@@ -1,0 +1,1402 @@
+
+================================================================================
+  MBEDX — ESP32 Embedded Systems Workshop
+  DAY 1 — All Exercise & Mini Project Codes
+  Organized by CIRCUITICIAN x SRIJAN 26
+  Platform: PlatformIO (VS Code) | Framework: Arduino
+================================================================================
+  HOW TO USE THESE CODES:
+  1. Open VS Code with PlatformIO installed
+  2. Create a new project: Board = esp32dev, Framework = arduino
+  3. Copy the code into src/main.cpp
+  4. Click the Upload button (→) to flash to your ESP32
+  5. Open Serial Monitor at 115200 baud to see output
+================================================================================
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 1 — Getting Started with ESP32 & PlatformIO
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 1.1 — Serial Hello World
+  Goal: Send your first message from ESP32 to your computer over USB
+  Components needed: ESP32, USB cable
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>  // Always include this in PlatformIO projects
+
+void setup() {
+  // Serial.begin() starts communication between ESP32 and your computer
+  // 115200 is the "baud rate" — speed of communication in bits per second
+  // Your Serial Monitor must be set to the SAME baud rate to read messages
+  Serial.begin(115200);
+
+  // Small delay to let Serial connection settle before printing
+  delay(1000);
+
+  // Print a welcome message — this runs ONCE when ESP32 powers on
+  Serial.println("Hello from ESP32!");
+  Serial.println("====================");
+
+  // xPortGetCoreID() tells us which CPU core is running this code
+  // ESP32 has 2 cores: Core 0 (Wi-Fi/OS) and Core 1 (your code)
+  Serial.print("Running on Core: ");
+  Serial.println(xPortGetCoreID());  // Should print 1
+
+  Serial.println("Setup complete!");
+}
+
+void loop() {
+  // loop() runs forever after setup() finishes
+  // We print a message every 2 seconds to show the ESP32 is alive
+
+  Serial.println("ESP32 is running... (loop)");
+  delay(2000);  // Wait 2000 milliseconds = 2 seconds
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 1.2 — LED Blink with Resistor Calculation
+  Goal: Blink an LED connected to GPIO 2
+  Components: ESP32, 1x LED, 1x 220Ω resistor, breadboard, jumper wires
+  Wiring: GPIO2 → 220Ω resistor → LED (+) → LED (-) → GND
+  WHY 220Ω? Formula: R = (3.3V - 2.0V) ÷ 0.010A = 130Ω → use 220Ω (safe)
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+// Define the GPIO pin number as a constant
+// Using a #define makes it easy to change the pin in one place
+#define LED_PIN 2  // GPIO 2 — built-in LED on most ESP32 boards too!
+
+void setup() {
+  Serial.begin(115200);
+
+  // pinMode() tells ESP32 whether this pin is INPUT or OUTPUT
+  // LED needs OUTPUT because we want to send voltage TO it
+  pinMode(LED_PIN, OUTPUT);
+
+  Serial.println("LED Blink started!");
+  Serial.println("Watch GPIO 2 — LED should blink every 500ms");
+}
+
+void loop() {
+  // Turn LED ON by setting the pin HIGH (3.3V flows out of pin)
+  digitalWrite(LED_PIN, HIGH);
+  Serial.println("LED → ON");
+  delay(500);  // Keep it on for 500ms
+
+  // Turn LED OFF by setting the pin LOW (0V, no current flows)
+  digitalWrite(LED_PIN, LOW);
+  Serial.println("LED → OFF");
+  delay(500);  // Keep it off for 500ms
+
+  // This creates a blinking effect: ON 500ms, OFF 500ms, repeat
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 1.3 — Push Button with INPUT_PULLUP
+  Goal: Read a button press and print the state to Serial Monitor
+  Components: ESP32, 1x push button, breadboard, jumper wires
+  Wiring: GPIO 15 → Button → GND (no resistor needed! Internal pullup used)
+  WHY INPUT_PULLUP? Without it, the pin "floats" — gives random HIGH/LOW
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define BUTTON_PIN 15  // GPIO 15 — connect button between this pin and GND
+
+void setup() {
+  Serial.begin(115200);
+
+  // INPUT_PULLUP activates ESP32's built-in resistor that pulls the pin HIGH
+  // So: Button NOT pressed = pin reads HIGH (1)
+  //     Button IS pressed  = pin reads LOW (0) because it connects to GND
+  // This is called "active LOW" logic — LOW means pressed
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.println("Button Reader ready!");
+  Serial.println("Press the button and watch Serial Monitor");
+}
+
+void loop() {
+  // digitalRead() returns HIGH (1) or LOW (0)
+  int buttonState = digitalRead(BUTTON_PIN);
+
+  if (buttonState == LOW) {
+    // LOW means button is PRESSED (connected to GND by the button)
+    Serial.println("Button PRESSED!");
+  } else {
+    // HIGH means button is NOT pressed (pulled up by internal resistor)
+    Serial.println("Button released.");
+  }
+
+  delay(100);  // Check every 100ms — fast enough to catch button presses
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 1.4 — Button Toggles LED (with Software Debounce)
+  Goal: Each button press toggles LED ON/OFF like a light switch
+  Components: ESP32, 1x LED, 1x 220Ω resistor, 1x push button
+  Wiring: GPIO15 → Button → GND | GPIO2 → 220Ω → LED → GND
+  NEW CONCEPT: Debounce — buttons "bounce" mechanically, causing false triggers
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LED_PIN    2   // LED on GPIO 2
+#define BUTTON_PIN 15  // Button on GPIO 15
+
+bool ledState = false;         // Tracks if LED is ON (true) or OFF (false)
+int lastButtonState = HIGH;    // Previous button state (HIGH = not pressed)
+unsigned long lastDebounceTime = 0;  // Timestamp of last button change
+const int DEBOUNCE_DELAY = 50; // 50ms debounce time — ignores short bounces
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.println("Button Toggle LED ready!");
+  Serial.println("Press button to toggle LED ON/OFF");
+}
+
+void loop() {
+  int currentButtonState = digitalRead(BUTTON_PIN);
+
+  // Check if button state has CHANGED since last loop
+  if (currentButtonState != lastButtonState) {
+    // Record WHEN the change happened
+    lastDebounceTime = millis();  // millis() = milliseconds since ESP32 started
+  }
+
+  // Only act if the button has been STABLE for at least DEBOUNCE_DELAY ms
+  // This filters out the mechanical bouncing of the button contacts
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    // Button is now stable — check if it was just PRESSED (went LOW)
+    if (currentButtonState == LOW) {
+      // Toggle: flip the LED state (ON→OFF or OFF→ON)
+      ledState = !ledState;
+
+      // Apply the new state to the actual LED pin
+      digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+
+      Serial.print("LED toggled → ");
+      Serial.println(ledState ? "ON" : "OFF");
+    }
+  }
+
+  // Save current state for comparison in next loop iteration
+  lastButtonState = currentButtonState;
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 2 — Digital I/O & Hardware Interrupts
+════════════════════════════════════════════════════════════════════════════════
+
+// ============================================================
+//  EXERCISE 2.1 — Button Toggle LED Blink using POLLING
+//  LED blinks every 1000ms. Button stops/starts blinking.
+//  Polling = CPU manually checks button every loop iteration.
+//  Components: LED → GPIO2 | Button → GPIO14 → GND
+// ============================================================
+
+#include <Arduino.h>
+
+#define LED_PIN    2
+#define BUTTON_PIN 14
+
+bool isBlinkActive = true;  // Tracks if blinking is ON or OFF
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN,    OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP); // Internal pull-up: NOT pressed = HIGH, Pressed = LOW
+  Serial.println("Polling Demo — Press button to toggle blink");
+}
+
+void loop() {
+
+  // ── POLLING: CPU manually reads the button pin every loop ──
+  // Even when nobody is pressing it, CPU wastes time checking.
+  // This is the INEFFICIENT way — it also blocks LED blinking
+  // while the button check delay(611) is running!
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    isBlinkActive = !isBlinkActive;   // Toggle blink ON ↔ OFF
+    Serial.print("Blink: ");
+    Serial.println(isBlinkActive ? "ON" : "OFF");
+    delay(611);   // Wait to avoid reading one press multiple times
+  }
+
+  // ── LED BLINK: only runs when blinking is active ────────────
+  if (isBlinkActive) {
+    digitalWrite(LED_PIN, HIGH);  // LED ON
+    delay(1000);                  // Wait 1 second
+    digitalWrite(LED_PIN, LOW);   // LED OFF
+    delay(1000);                  // Wait 1 second
+  } else {
+    digitalWrite(LED_PIN, LOW);   // Keep LED OFF when blink stopped
+  }
+
+}
+
+
+// ============================================================
+//  EXERCISE 2.2 — Button Toggle LED Blink using INTERRUPT
+//  Same behavior as 2.1 — but button is handled by INTERRUPT.
+//  CPU no longer wastes time checking the button manually.
+//  Components: LED → GPIO2 | Button → GPIO14 → GND
+// ============================================================
+
+#include <Arduino.h>
+
+#define LED_PIN    2
+#define BUTTON_PIN 14
+
+volatile bool isBlinkActive = true;
+bool lastBlinkState = true;  // Tracks previous state to detect change
+
+void IRAM_ATTR onButtonPress() {
+  isBlinkActive = !isBlinkActive;   // Toggle blink ON ↔ OFF
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN,    OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), onButtonPress, FALLING);
+  Serial.println("Interrupt Demo — Press button to toggle blink");
+}
+
+void loop() {
+
+  // Print ONCE only when state has changed
+  if (isBlinkActive != lastBlinkState) {
+    lastBlinkState = isBlinkActive;
+    Serial.print("Blink: ");
+    Serial.println(isBlinkActive ? "ON" : "OFF");
+  }
+
+  // ── LED BLINK: only runs when blinking is active ────────────
+  if (isBlinkActive) {
+    digitalWrite(LED_PIN, HIGH);  // LED ON
+    delay(1000);                  // Wait 1 second
+    digitalWrite(LED_PIN, LOW);   // LED OFF
+    delay(1000);                  // Wait 1 second
+  } else {
+    digitalWrite(LED_PIN, LOW);   // Keep LED OFF
+    delay(611);
+  }
+
+}
+
+────────────────────────────────────────────────────────────────────────────────
+  MINI PROJECT 2.3 — RPM Counter (Tachometer)
+  Goal: Count how many times IR sensor is triggered per minute = RPM
+  Use Case: Measure rotation speed of a fan or motor
+  Components: ESP32, IR sensor, LED, Buzzer
+  Wiring: IR→GPIO14, LED→GPIO2, Buzzer→GPIO25
+  HOW IT WORKS: Attach a small piece of tape to a spinning disc/fan
+                Each time the tape passes the IR sensor = 1 pulse = 1 revolution
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define IR_PIN     14   // IR sensor for detecting rotation
+#define LED_PIN     2   // Blinks every 500ms to show system is alive
+#define BUZZER_PIN 25   // Buzzes if RPM exceeds threshold
+
+// volatile because changed inside ISR
+volatile int pulseCount = 0;  // Counts IR triggers in current second
+
+unsigned long lastRPMTime  = 0;  // Last time we calculated RPM
+unsigned long lastLEDTime  = 0;  // Last time we toggled LED
+bool ledState = false;
+
+const int HIGH_RPM_THRESHOLD = 1000;  // Buzzer activates above this RPM
+int currentRPM = 0;
+
+// ISR — called every time IR sensor detects a pulse (one revolution)
+void IRAM_ATTR onPulse() {
+  pulseCount++;  // Just count — nothing else!
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(IR_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Trigger on FALLING edge (object blocks IR = signal goes LOW)
+  attachInterrupt(digitalPinToInterrupt(IR_PIN), onPulse, FALLING);
+
+  Serial.println("RPM Counter (Tachometer) ready!");
+  Serial.println("Spin something in front of the IR sensor...");
+  Serial.println("Format: RPM:XXXX");
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  // ── TASK 1: Calculate RPM every 1 second ──────────────────────────
+  if (now - lastRPMTime >= 1000) {
+    lastRPMTime = now;
+
+    // Safely read and reset pulse count
+    // noInterrupts() / interrupts() prevents ISR from changing
+    // pulseCount while we're reading it (race condition protection)
+    noInterrupts();
+    int count = pulseCount;
+    pulseCount = 0;
+    interrupts();
+
+    // RPM = pulses per second × 60
+    // (Assumes 1 pulse = 1 full revolution)
+    currentRPM = count * 60;
+
+    // Print in the format the slide specified
+    Serial.print("RPM:");
+    Serial.println(currentRPM);
+  }
+
+  // ── TASK 2: Blink LED every 500ms (independent of RPM calc) ───────
+  if (now - lastLEDTime >= 500) {
+    lastLEDTime = now;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
+  }
+
+  // ── TASK 3: Buzzer alert if RPM exceeds threshold ──────────────────
+  if (currentRPM > HIGH_RPM_THRESHOLD) {
+    // Short beep to alert high RPM
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(50);   // NOTE: This tiny delay is acceptable for a beep
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 3 — Bare Metal & Register Programming
+════════════════════════════════════════════════════════════════════════════════
+  IMPORTANT: These exercises use ESP-IDF framework, NOT Arduino!
+  Change platformio.ini:
+    framework = espidf        (instead of arduino)
+    board = esp32dev
+────────────────────────────────────────────────────────────────────────────────
+
+// ============================================================
+//  EXERCISE 3.1 — Bare Metal LED Blink (Arduino Framework)
+//  Blink LED using direct register writes — NO digitalWrite()!
+//  Components: LED → GPIO2 → 220Ω → GND
+// ============================================================
+
+#include <Arduino.h>
+
+// Memory-mapped register addresses from ESP32 TRM Chapter 4
+// We cast the address to a volatile uint32_t pointer and dereference it
+// volatile = always read/write from actual hardware, never cache it
+#define GPIO_OUT_REG    (*(volatile uint32_t*)0x3FF44004)  // Controls pin HIGH/LOW
+#define GPIO_ENABLE_REG (*(volatile uint32_t*)0x3FF44020)  // Enables pin as output
+
+// (1 << 2) = binary 00000100 — affects ONLY bit 2 = GPIO2
+#define LED_BIT (1 << 2)
+
+void setup() {
+  Serial.begin(115200);
+
+  // Enable GPIO2 as output by setting bit 2 of ENABLE register
+  // |= means "set this bit, leave all other bits unchanged"
+  GPIO_ENABLE_REG |= LED_BIT;
+
+  Serial.println("Bare Metal LED Blink — no digitalWrite() used!");
+}
+
+void loop() {
+  // Set bit 2 HIGH → LED ON
+  GPIO_OUT_REG |= LED_BIT;
+  delay(500);
+
+  // Clear bit 2 LOW → LED OFF
+  // ~LED_BIT = 11111011 — clears ONLY bit 2, others unchanged
+  GPIO_OUT_REG &= ~LED_BIT;
+  delay(500);
+}
+
+
+
+// ============================================================
+//  EXERCISE 3.2 — Bare Metal Button Read (Full Bare Metal)
+//  NO pinMode(), NO digitalRead(), NO digitalWrite()
+//  Components: LED → GPIO2 | Button → GPIO18 → GND
+// ============================================================
+
+#include <Arduino.h>
+
+// ── GPIO Registers (TRM Chapter 4, base = 0x3FF44000) ────────
+#define GPIO_OUT_REG    (*(volatile uint32_t*)0x3FF44004)  // base + 0x004 — output values
+#define GPIO_ENABLE_REG (*(volatile uint32_t*)0x3FF44020)  // base + 0x020 — output enable
+#define GPIO_IN_REG     (*(volatile uint32_t*)0x3FF4403C)  // base + 0x03C — input values ✅
+
+// ── IO_MUX Register for GPIO18 (TRM Chapter 4) ───────────────
+#define IO_MUX_GPIO18_REG (*(volatile uint32_t*)0x3FF49070)
+
+// IO_MUX bit positions
+#define FUN_IE      (1 << 9)   // Bit 9  — Input Enable
+#define FUN_WPU     (1 << 8)   // Bit 8  — Pull-Up Enable
+#define FUN_WPD     (1 << 7)   // Bit 7  — Pull-Down Disable
+#define MCU_SEL_GPIO (2 << 12) // Bits 14:12 — route pin through GPIO matrix
+#define MCU_SEL_MASK (7 << 12) // 3-bit mask to clear MCU_SEL before setting
+
+#define LED_BIT    (1 << 2)   // Bit 2  = GPIO2
+#define BUTTON_BIT (1 << 18)  // Bit 18 = GPIO18
+
+void setup() {
+  Serial.begin(115200);
+
+  // ── GPIO2 → OUTPUT (LED) ─────────────────────────────────────
+  GPIO_ENABLE_REG |= LED_BIT;
+
+  // ── GPIO18 → INPUT with PULL-UP (Button) ─────────────────────
+  GPIO_ENABLE_REG &= ~BUTTON_BIT;       // Clear bit 18 → not an output
+
+  IO_MUX_GPIO18_REG &= ~MCU_SEL_MASK;  // Clear function select bits
+  IO_MUX_GPIO18_REG |=  MCU_SEL_GPIO;  // MCU_SEL = 2 → route to GPIO matrix
+  IO_MUX_GPIO18_REG |=  FUN_IE;        // Enable input buffer
+  IO_MUX_GPIO18_REG |=  FUN_WPU;       // Enable pull-up resistor
+  IO_MUX_GPIO18_REG &= ~FUN_WPD;       // Disable pull-down
+
+  Serial.println("Bare Metal GPIO18 INPUT_PULLUP ready!");
+  Serial.println("Press button → LED ON | Release → LED OFF");
+}
+
+void loop() {
+  // Read bit 18 from GPIO_IN_REG (0x3FF4403C — the correct address!)
+  int buttonState = (GPIO_IN_REG >> 18) & 1;
+
+  if (buttonState == 0) {
+    GPIO_OUT_REG |= LED_BIT;    // Button PRESSED → LED ON
+  } else {
+    GPIO_OUT_REG &= ~LED_BIT;   // Button RELEASED → LED OFF
+  }
+}
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 4 — Analog Sensing (ADC)
+  NOTE: Switch back to Arduino framework for these exercises
+  platformio.ini: framework = arduino
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 4.1 — Raw LDR Reading + Serial Plotter
+  Goal: Read raw ADC value from LDR, visualize it in PlatformIO Serial Plotter
+  Components: ESP32, LDR, 10kΩ resistor
+  Wiring: 3.3V → LDR → GPIO34 → 10kΩ → GND
+  HOW TO SEE THE GRAPH: PlatformIO → Serial Plotter (not Serial Monitor!)
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+// IMPORTANT: Always use ADC1 pins (GPIO 32-39) when Wi-Fi might be used
+// GPIO 34-39 are INPUT ONLY (no output) — perfect for sensors
+#define LDR_PIN 34   // GPIO34 = ADC1 Channel 6
+
+void setup() {
+  Serial.begin(115200);
+
+  // No pinMode needed for analog pins — they default to INPUT
+  // analogRead() automatically configures the pin
+
+  Serial.println("LDR Raw Value Reader");
+  Serial.println("Open Serial PLOTTER to see live graph!");
+}
+
+void loop() {
+  // analogRead() returns a value between 0 and 4095
+  // 0   = 0V   (complete darkness, LDR has very high resistance)
+  // 4095 = 3.3V (bright light, LDR has very low resistance)
+  // 12-bit ADC: 2^12 = 4096 possible values (0 to 4095)
+  int rawValue = analogRead(LDR_PIN);
+
+  // Print ONLY the number — Serial Plotter needs just the value
+  // (No text labels, or plotter won't work correctly)
+  Serial.println(rawValue);
+
+  delay(50);  // 50ms delay = ~20 readings per second (smooth graph)
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 4.2 — Map Raw ADC to Light Percentage
+  Goal: Convert raw 0-4095 value to a human-readable 0-100% percentage
+  Components: Same as 4.1
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LDR_PIN 34
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Light Level % Reader");
+}
+
+void loop() {
+  // Read raw ADC (0-4095)
+  int rawValue = analogRead(LDR_PIN);
+
+  // map() function scales a value from one range to another
+  // map(value, fromLow, fromHigh, toLow, toHigh)
+  // Here: raw 0-4095 → percentage 0-100
+  int lightPercent = map(rawValue, 0, 4095, 0, 100);
+
+  // Print both raw and percentage for learning purposes
+  Serial.print("Light Level: ");
+  Serial.print(lightPercent);
+  Serial.print("%  |  Raw ADC: ");
+  Serial.println(rawValue);
+
+  delay(500);  // Update every 500ms
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  MINI PROJECT 4.3 — Smart Street Light (3-Zone Light Controller)
+  Goal: Automatically control LEDs and buzzer based on light levels
+  ZONES: BRIGHT (>70%) = All OFF | DIM (30-70%) = 1 LED | DARK (<30%) = All ON + Buzzer
+  Components: ESP32, LDR, 10kΩ resistor, 3x LEDs, 3x 220Ω resistors, buzzer
+  Wiring: LDR→GPIO34, LED1→GPIO2, LED2→GPIO4, LED3→GPIO5, Buzzer→GPIO25
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+// Pin definitions
+#define LDR_PIN    34   // LDR analog input
+#define LED1_PIN    2   // First LED
+#define LED2_PIN    4   // Second LED
+#define LED3_PIN    5   // Third LED
+#define BUZZER_PIN 25   // Buzzer
+
+// Zone thresholds (percentage)
+#define BRIGHT_THRESHOLD  70  // Above 70% = BRIGHT
+#define DARK_THRESHOLD    30  // Below 30% = DARK (between = DIM)
+
+// Track previous zone to detect STATE CHANGES (for buzzer beep)
+String previousZone = "";
+
+void setup() {
+  Serial.begin(115200);
+
+  // Set all output pins
+  pinMode(LED1_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+  pinMode(LED3_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // Start with everything OFF
+  digitalWrite(LED1_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+  digitalWrite(LED3_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  Serial.println("Smart Street Light Ready!");
+  Serial.println("BRIGHT>70%: OFF | DIM 30-70%: 1 LED | DARK<30%: ALL + Buzz");
+}
+
+// Helper function to beep buzzer once on zone change
+void beepOnce() {
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(100);  // 100ms beep
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+void loop() {
+  // Read and convert LDR value to percentage
+  int rawValue = analogRead(LDR_PIN);
+  int lightPercent = map(rawValue, 0, 4095, 0, 100);
+
+  String currentZone = "";
+
+  if (lightPercent > BRIGHT_THRESHOLD) {
+    // ── ZONE 1: BRIGHT — Turn everything OFF ─────────────────────────
+    currentZone = "BRIGHT";
+    digitalWrite(LED1_PIN, LOW);
+    digitalWrite(LED2_PIN, LOW);
+    digitalWrite(LED3_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+
+  } else if (lightPercent >= DARK_THRESHOLD) {
+    // ── ZONE 2: DIM — Turn on only 1 LED ────────────────────────────
+    currentZone = "DIM";
+    digitalWrite(LED1_PIN, HIGH);  // Only LED1 on
+    digitalWrite(LED2_PIN, LOW);
+    digitalWrite(LED3_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+
+  } else {
+    // ── ZONE 3: DARK — All LEDs ON + Buzzer ─────────────────────────
+    currentZone = "DARK";
+    digitalWrite(LED1_PIN, HIGH);
+    digitalWrite(LED2_PIN, HIGH);
+    digitalWrite(LED3_PIN, HIGH);
+    // Buzzer stays ON in DARK mode (managed below)
+  }
+
+  // Beep buzzer ONLY when zone CHANGES (not every loop iteration!)
+  if (currentZone != previousZone) {
+    if (currentZone == "DARK") {
+      beepOnce();  // Alert on entering dark zone
+    }
+    Serial.print("Zone changed to: ");
+    Serial.print(currentZone);
+    Serial.print(" | Light: ");
+    Serial.print(lightPercent);
+    Serial.println("%");
+
+    previousZone = currentZone;  // Update previous zone
+  }
+
+  delay(200);  // Check light every 200ms
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 5 — PWM & Output Control (LEDC API)
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 5.1 — Smooth LED Fade (Breathing Effect)
+  Goal: Gradually increase then decrease LED brightness — like breathing
+  Components: ESP32, LED, 220Ω resistor
+  Wiring: GPIO2 → 220Ω → LED → GND
+  WHY LEDC? digitalWrite() is only ON/OFF. LEDC gives us 256 brightness levels!
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LED_PIN      2   // GPIO pin for LED
+#define LEDC_CHANNEL 0   // LEDC has 16 channels (0-15) — pick any
+#define LEDC_FREQ    5000 // 5000 Hz frequency (5 kHz) — invisible flicker
+#define LEDC_RES     8   // 8-bit resolution = 256 brightness levels (0-255)
+
+void setup() {
+  Serial.begin(115200);
+
+  // Step 1: Configure the LEDC channel with frequency and resolution
+  ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RES);
+
+  // Step 2: Attach the GPIO pin to the LEDC channel
+  ledcAttachPin(LED_PIN, LEDC_CHANNEL);
+
+  Serial.println("LED Breathing Effect started!");
+}
+
+void loop() {
+  // ── Fade IN: 0 (off) to 255 (full brightness) ────────────────────
+  for (int brightness = 0; brightness <= 255; brightness++) {
+    ledcWrite(LEDC_CHANNEL, brightness);  // Set PWM duty cycle
+    delay(8);  // Small delay for smooth fade (8ms × 256 steps = ~2 seconds up)
+  }
+
+  // ── Fade OUT: 255 (full brightness) to 0 (off) ────────────────────
+  for (int brightness = 255; brightness >= 0; brightness--) {
+    ledcWrite(LEDC_CHANNEL, brightness);
+    delay(8);  // Same delay for smooth fade down
+  }
+
+  Serial.println("One breath cycle complete.");
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 5.2 — 5-Step Button Brightness Control
+  Goal: Each button press steps through 0% → 25% → 50% → 75% → 100% → 0%
+  Components: ESP32, LED, 220Ω, button
+  Wiring: GPIO2 → LED, GPIO15 → Button → GND
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LED_PIN      2
+#define BUTTON_PIN  15
+#define LEDC_CHANNEL 0
+#define LEDC_FREQ    5000
+#define LEDC_RES     8
+
+// The 5 brightness levels as duty cycle values (0-255 for 8-bit)
+// 0% = 0, 25% = 64, 50% = 128, 75% = 192, 100% = 255
+int brightnessSteps[] = {0, 64, 128, 192, 255};
+int stepCount         = 5;     // Total number of steps
+int currentStep       = 0;     // Which step we're on (starts at 0 = OFF)
+
+// Debounce variables
+int lastButtonState          = HIGH;
+unsigned long lastDebounceTime = 0;
+const int DEBOUNCE_DELAY     = 50;
+
+void setup() {
+  Serial.begin(115200);
+
+  ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RES);
+  ledcAttachPin(LED_PIN, LEDC_CHANNEL);
+  ledcWrite(LEDC_CHANNEL, 0);  // Start with LED off
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.println("Button Brightness Steps ready!");
+  Serial.println("Each press: 0% → 25% → 50% → 75% → 100% → 0%");
+}
+
+void loop() {
+  int currentButtonState = digitalRead(BUTTON_PIN);
+
+  // Debounce check
+  if (currentButtonState != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    // Detect the FALLING EDGE (moment button is pressed)
+    if (currentButtonState == LOW && lastButtonState == HIGH) {
+      // Move to the NEXT step (wrap around after step 4 back to 0)
+      currentStep = (currentStep + 1) % stepCount;
+
+      // Get the duty cycle for this step
+      int duty = brightnessSteps[currentStep];
+      ledcWrite(LEDC_CHANNEL, duty);
+
+      // Calculate actual percentage for display
+      int percent = (duty * 100) / 255;
+      Serial.print("Brightness step ");
+      Serial.print(currentStep);
+      Serial.print(" → ");
+      Serial.print(percent);
+      Serial.println("%");
+    }
+  }
+
+  lastButtonState = currentButtonState;
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 5.3 — Tone Scale (Boot Jingle)
+  Goal: Play a musical scale (C5 → E5 → G5) on a buzzer using LEDC
+  Components: ESP32, piezo buzzer
+  Wiring: GPIO25 → Buzzer (+) → GND
+  MUSIC NOTE FREQUENCIES: C5=523Hz, D5=587Hz, E5=659Hz, G5=784Hz
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define BUZZER_PIN  25   // GPIO25 for buzzer (also a DAC pin — works great!)
+#define LEDC_CHANNEL 1   // Use channel 1 (channel 0 might be used by LED)
+#define LEDC_RES     8   // 8-bit resolution for tone
+
+// Note frequencies in Hz
+#define NOTE_C5 523
+#define NOTE_D5 587
+#define NOTE_E5 659
+#define NOTE_G5 784
+
+// Helper function to play a single note
+// frequency: Hz value of the note (e.g., 523 for C5)
+// duration: how long to play in milliseconds
+void playNote(int frequency, int duration) {
+  // ledcWriteTone() sets up PWM at the given frequency automatically
+  // It uses 50% duty cycle — which is the loudest for buzzers
+  ledcWriteTone(LEDC_CHANNEL, frequency);
+  delay(duration);  // Hold the note
+
+  // Brief silence between notes to make them distinct
+  ledcWriteTone(LEDC_CHANNEL, 0);  // 0 frequency = silence
+  delay(50);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Attach buzzer pin to LEDC channel
+  ledcAttachPin(BUZZER_PIN, LEDC_CHANNEL);
+
+  Serial.println("Playing boot jingle...");
+
+  // Play the jingle once on startup
+  playNote(NOTE_C5, 300);  // C5 — 300ms
+  playNote(NOTE_E5, 300);  // E5 — 300ms
+  playNote(NOTE_G5, 500);  // G5 — 500ms (longer finish)
+
+  Serial.println("Boot jingle complete!");
+}
+
+void loop() {
+  // Play the full scale every 5 seconds as a demo
+  Serial.println("Playing scale...");
+
+  playNote(NOTE_C5, 250);
+  playNote(NOTE_D5, 250);
+  playNote(NOTE_E5, 250);
+  playNote(NOTE_G5, 400);
+
+  delay(5000);  // Wait 5 seconds before playing again
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  MINI PROJECT 5.4 — LDR Auto Dimmer
+  Goal: LED brightness automatically adjusts based on ambient light
+        Bright room = dim LED | Dark room = bright LED (like auto screen brightness)
+  Components: ESP32, LDR, 10kΩ, LED, 220Ω
+  Wiring: LDR→GPIO34, LED→GPIO2
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LDR_PIN       34   // Analog input for LDR
+#define LED_PIN        2   // PWM LED output
+#define LEDC_CHANNEL   0
+#define LEDC_FREQ   5000
+#define LEDC_RES       8   // 8-bit = 0 to 255
+
+void setup() {
+  Serial.begin(115200);
+
+  // Setup LEDC for LED
+  ledcSetup(LEDC_CHANNEL, LEDC_FREQ, LEDC_RES);
+  ledcAttachPin(LED_PIN, LEDC_CHANNEL);
+
+  Serial.println("LDR Auto Dimmer ready!");
+  Serial.println("Cover LDR to brighten LED. Shine light to dim it.");
+}
+
+void loop() {
+  // Read the light sensor (0 = dark, 4095 = very bright)
+  int ldrRaw = analogRead(LDR_PIN);
+
+  // INVERT and map to LED brightness:
+  // When light is HIGH (bright room), LED should be LOW (dim)
+  // When light is LOW  (dark room),  LED should be HIGH (bright)
+  // map(value, fromLow, fromHigh, toLow, toHigh)
+  // We INVERT by swapping toLow and toHigh (255, 0 instead of 0, 255)
+  int ledBrightness = map(ldrRaw, 0, 4095, 255, 0);
+
+  // Apply brightness to LED via LEDC PWM
+  ledcWrite(LEDC_CHANNEL, ledBrightness);
+
+  // Print values for debugging
+  Serial.print("LDR Raw: ");
+  Serial.print(ldrRaw);
+  Serial.print("  |  LED Brightness: ");
+  Serial.print(ledBrightness);
+  Serial.print("/255  (");
+  Serial.print((ledBrightness * 100) / 255);
+  Serial.println("%)");
+
+  delay(100);  // Update 10 times per second — smooth and responsive
+}
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 6 — DAC (Digital to Analog Converter)
+  GPIO25 = DAC1 | GPIO26 = DAC2
+  8-bit resolution → 256 steps (0 = 0V, 255 = 3.3V)
+  Step size = 3.3V ÷ 255 ≈ 12.9mV per step
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXAMPLE 6.1 — DAC Voltage Sweep (Analog Ramp)
+  Goal: Smoothly ramp voltage from 0V → 3.3V → 0V on GPIO25
+        Watch it on a multimeter or oscilloscope!
+  Components: ESP32, multimeter (set to DC voltage) OR LED + 220Ω
+  Wiring: GPIO25 → multimeter probe (or LED anode → 220Ω → GND)
+  KEY DIFFERENCE from PWM: This is TRUE analog voltage, not switching pulses
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+// DAC pins are fixed on ESP32 — cannot be changed
+// DAC1 = GPIO25 | DAC2 = GPIO26
+#define DAC_PIN 25  // GPIO25 = DAC1
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("DAC Voltage Sweep Demo");
+  Serial.println("Watch GPIO25 voltage ramp 0V → 3.3V → 0V");
+  Serial.println("Connect a multimeter to GPIO25 and GND to see it!");
+}
+
+void loop() {
+  // ── RAMP UP: 0 → 255 (0V → 3.3V) ─────────────────────────────
+  Serial.println("Ramping UP: 0V → 3.3V");
+  for (int value = 0; value <= 255; value++) {
+
+    // dacWrite(pin, value) — sets TRUE analog voltage on the pin
+    // value 0   = 0.0V
+    // value 128 = 1.65V (half of 3.3V)
+    // value 255 = 3.3V
+    dacWrite(DAC_PIN, value);
+
+    // Print voltage calculation every 32 steps to avoid Serial flood
+    if (value % 32 == 0) {
+      float voltage = (value / 255.0) * 3.3;
+      Serial.print("  DAC value: ");
+      Serial.print(value);
+      Serial.print(" → Voltage: ");
+      Serial.print(voltage, 2);
+      Serial.println("V");
+    }
+
+    delayMicroseconds(500);  // 500µs per step → full ramp takes ~128ms
+  }
+
+  delay(500);  // Hold at 3.3V for half a second
+
+  // ── RAMP DOWN: 255 → 0 (3.3V → 0V) ──────────────────────────
+  Serial.println("Ramping DOWN: 3.3V → 0V");
+  for (int value = 255; value >= 0; value--) {
+    dacWrite(DAC_PIN, value);
+    delayMicroseconds(500);
+  }
+
+  delay(500);  // Hold at 0V for half a second
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXAMPLE 6.2 — DAC Sine Wave Generator
+  Goal: Generate a smooth 1Hz sine wave on GPIO25
+        A sine wave is the most fundamental waveform in electronics
+  Components: ESP32, oscilloscope (ideal) OR just Serial Plotter
+  Wiring: GPIO25 → oscilloscope probe → GND
+  HOW IT WORKS: sin() gives values from -1.0 to +1.0
+                We shift and scale it to 0–255 for the DAC
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <math.h>  // Needed for sin() and PI
+
+#define DAC_PIN 25  // GPIO25 = DAC1
+
+// Sine wave parameters — change these to experiment!
+#define STEPS     360   // Number of steps per full wave cycle (1 full rotation)
+#define DELAY_US  2778  // Microseconds between steps → 360 × 2778µs ≈ 1 second per cycle
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("DAC Sine Wave Generator — 1Hz on GPIO25");
+  Serial.println("Open Serial PLOTTER to see the wave shape!");
+}
+
+void loop() {
+  // Loop through 0° to 359° (one full sine cycle)
+  for (int angle = 0; angle < STEPS; angle++) {
+
+    // Convert angle from degrees to radians
+    // sin() function needs radians, not degrees
+    // radians = degrees × (π ÷ 180)
+    float radians = angle * (PI / 180.0);
+
+    // sin(radians) gives a value between -1.0 and +1.0
+    // We scale and shift it to fit DAC range 0–255:
+    //   × 127 → range becomes -127 to +127
+    //   + 128 → range becomes 1 to 255 (centered at 128 = 1.65V)
+    int dacValue = 128 + (int)(127 * sin(radians));
+
+    // Send the value to the DAC — this creates true analog voltage
+    dacWrite(DAC_PIN, dacValue);
+
+    // Print raw value to Serial — open Serial PLOTTER to see the wave!
+    Serial.println(dacValue);
+
+    // Wait between steps — controls the frequency of the wave
+    // 2778µs × 360 steps = ~1,000,000µs = 1 second per full cycle = 1Hz
+    delayMicroseconds(DELAY_US);
+  }
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 7 — DHT11 Sensor & Communication Protocols
+  SETUP: Add to platformio.ini before uploading:
+    lib_deps = adafruit/DHT sensor library
+  Wiring: DHT11 VCC→3.3V | GND→GND | DATA→GPIO4
+          Add 10kΩ pull-up resistor between DATA and 3.3V
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 7.1 — Read Temperature, Humidity & Heat Index
+  Goal: Read all 3 values and print them every 2 seconds
+  Components: ESP32, DHT11 sensor, 10kΩ resistor
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <DHT.h>  // Adafruit DHT library — add to lib_deps in platformio.ini
+
+#define DHT_PIN  4      // DATA pin of DHT11 → GPIO4
+#define DHT_TYPE DHT11  // We are using DHT11 (not DHT22 or DHT21)
+
+// Create a DHT object — it handles all the complex 1-wire timing for us
+DHT dht(DHT_PIN, DHT_TYPE);
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();  // Initialize the sensor
+
+  Serial.println("DHT11 Sensor Ready!");
+  Serial.println("Reading every 2 seconds...");
+  Serial.println("──────────────────────────────────────────");
+}
+
+void loop() {
+  // DHT11 MUST have at least 2 seconds between readings
+  // Reading faster gives NaN (Not a Number) errors
+  delay(2000);
+
+  float temperature = dht.readTemperature();  // °Celsius
+  float humidity    = dht.readHumidity();      // Percentage (0–100%)
+
+  // ALWAYS check for errors before using the values!
+  // isnan() = "is Not a Number" — true if reading failed
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("ERROR: Sensor read failed!");
+    Serial.println("Check: wiring correct? pull-up resistor present?");
+    return;  // Skip the rest, try again next loop
+  }
+
+  // Heat Index = "feels like" temperature — accounts for humidity
+  // false = return in Celsius (true = Fahrenheit)
+  float heatIndex = dht.computeHeatIndex(temperature, humidity, false);
+
+  // Print all three values
+  Serial.print("Temp: ");
+  Serial.print(temperature);
+  Serial.print("°C  |  Humidity: ");
+  Serial.print(humidity);
+  Serial.print("%  |  Heat Index: ");
+  Serial.print(heatIndex);
+  Serial.println("°C");
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 7.2 — Mini Project: 3-Zone Temperature Alert
+  Goal: 3-colour LED system changes based on temperature
+  COLD  <20°C  → Blue LED ON
+  NORMAL 20-35°C → Green LED ON
+  HOT   >35°C  → Red LED ON + Buzzer alarm
+  Components: ESP32, DHT11, LED×3 (Red/Green/Blue), 220Ω×3, Buzzer
+  Wiring: DHT11→GPIO4 | LED_RED→GPIO2 | LED_GREEN→GPIO5
+          LED_BLUE→GPIO18 | Buzzer→GPIO25
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <DHT.h>
+
+#define DHT_PIN       4
+#define DHT_TYPE      DHT11
+
+#define LED_RED_PIN   2    // Red LED   → HOT zone
+#define LED_GREEN_PIN 5    // Green LED → NORMAL zone
+#define LED_BLUE_PIN  18   // Blue LED  → COLD zone
+#define BUZZER_PIN    25   // Buzzer    → HOT zone alert
+
+// Temperature zone thresholds (°C)
+#define COLD_THRESHOLD  20.0  // Below 20°C = COLD
+#define HOT_THRESHOLD   35.0  // Above 35°C = HOT
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+String previousZone = "";  // Track zone to detect changes
+
+// Turn off all LEDs — called before switching to a new zone
+void allLedsOff() {
+  digitalWrite(LED_RED_PIN,   LOW);
+  digitalWrite(LED_GREEN_PIN, LOW);
+  digitalWrite(LED_BLUE_PIN,  LOW);
+}
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  pinMode(LED_RED_PIN,   OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_BLUE_PIN,  OUTPUT);
+  pinMode(BUZZER_PIN,    OUTPUT);
+
+  allLedsOff();
+  digitalWrite(BUZZER_PIN, LOW);
+
+  Serial.println("3-Zone Temperature Alert System Ready!");
+  Serial.println("COLD<20°C=BLUE | NORMAL 20-35°C=GREEN | HOT>35°C=RED+BUZZ");
+}
+
+void loop() {
+  delay(2000);  // DHT11 needs 2 seconds between readings
+
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Sensor error — check wiring!");
+    return;
+  }
+
+  String currentZone = "";
+  allLedsOff();
+  digitalWrite(BUZZER_PIN, LOW);  // Buzzer off unless HOT
+
+  if (temp < COLD_THRESHOLD) {
+    // ── COLD ZONE ────────────────────────────────────────────
+    currentZone = "COLD";
+    digitalWrite(LED_BLUE_PIN, HIGH);
+
+  } else if (temp <= HOT_THRESHOLD) {
+    // ── NORMAL ZONE ──────────────────────────────────────────
+    currentZone = "NORMAL";
+    digitalWrite(LED_GREEN_PIN, HIGH);
+
+  } else {
+    // ── HOT ZONE ─────────────────────────────────────────────
+    currentZone = "HOT";
+    digitalWrite(LED_RED_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);   // Buzzer ON — alert!
+  }
+
+  // Print zone change notification
+  if (currentZone != previousZone) {
+    Serial.println("*** ZONE CHANGED → " + currentZone + " ***");
+    previousZone = currentZone;
+  }
+
+  Serial.print("Temp: ");
+  Serial.print(temp);
+  Serial.print("°C | Hum: ");
+  Serial.print(hum);
+  Serial.print("% | Zone: ");
+  Serial.println(currentZone);
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 8 — EEPROM (Persistent Flash Memory)
+  IMPORTANT: EEPROM.commit() MUST be called after every write
+             Without it, data is lost when power is removed!
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 8.1 — Boot Counter
+  Goal: Count how many times the ESP32 has been reset
+        Number persists even after removing power!
+  Components: ESP32 only (no extra hardware needed)
+  HOW TO TEST: Upload → open Serial Monitor → press RESET button repeatedly
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <EEPROM.h>  // Built-in ESP32 EEPROM emulation library
+
+// EEPROM address where we store the boot count
+// Think of EEPROM as an array — address 0, 1, 2... each holds 1 byte (0–255)
+#define BOOT_COUNT_ADDR 0
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);  // Give Serial time to connect
+
+  // EEPROM.begin() allocates the EEPROM memory region in flash
+  // 512 = number of bytes to use (max = 4096)
+  EEPROM.begin(512);
+
+  // Read current boot count from address 0
+  int bootCount = EEPROM.read(BOOT_COUNT_ADDR);
+
+  // On a brand-new device, flash is all 1s = 255
+  // If we read 255, this is the first boot — reset counter to 0
+  if (bootCount == 255) {
+    bootCount = 0;
+    Serial.println("First boot detected — initializing counter.");
+  }
+
+  // Increment the count
+  bootCount++;
+
+  // Write new count back to EEPROM address 0
+  // NOTE: .write() only updates the RAM buffer — NOT saved yet!
+  EEPROM.write(BOOT_COUNT_ADDR, bootCount);
+
+  // .commit() physically saves the RAM buffer to flash memory
+  // ALWAYS call this after writing — without it, data is LOST!
+  bool saved = EEPROM.commit();
+
+  Serial.println("=================================");
+  Serial.print("Boot Count: #");
+  Serial.println(bootCount);
+  Serial.print("Saved to flash: ");
+  Serial.println(saved ? "YES" : "FAILED!");
+  Serial.println("Press RESET to increment the count.");
+  Serial.println("=================================");
+}
+
+void loop() {
+  delay(1000);  // Nothing to do in loop
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 8.2 — Save LED State
+  Goal: Button toggles LED. ON/OFF state is remembered after power cut!
+  Components: ESP32, LED, 220Ω, push button
+  Wiring: GPIO2 → 220Ω → LED → GND | GPIO14 → Button → GND
+  HOW TO TEST: Toggle LED → unplug USB → replug → LED restores its state!
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <EEPROM.h>
+
+#define LED_PIN        2
+#define BUTTON_PIN    14
+#define LED_STATE_ADDR 1  // Store LED state at EEPROM address 1
+
+bool ledState = false;
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  EEPROM.begin(512);
+  pinMode(LED_PIN,    OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  // Read SAVED state from EEPROM on every boot
+  byte savedState = EEPROM.read(LED_STATE_ADDR);
+
+  // 1 = LED was ON before | 0 = LED was OFF | 255 = never saved
+  if (savedState == 1) {
+    ledState = true;
+    Serial.println("Restored: LED was ON → turning ON");
+  } else {
+    ledState = false;
+    Serial.println("Restored: LED was OFF → keeping OFF");
+  }
+
+  digitalWrite(LED_PIN, ledState ? HIGH : LOW);  // Apply restored state
+}
+
+void loop() {
+
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    ledState = !ledState;                          // Toggle state
+    digitalWrite(LED_PIN, ledState ? HIGH : LOW);  // Apply to LED
+
+    // Save new state immediately to EEPROM
+    EEPROM.write(LED_STATE_ADDR, ledState ? 1 : 0);
+    EEPROM.commit();  // Don't forget this!
+
+    Serial.print("LED toggled → ");
+    Serial.print(ledState ? "ON" : "OFF");
+    Serial.println(" (saved to EEPROM)");
+
+    delay(400);  // Simple debounce
+  }
+
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 8.3 — Sensor Data Store (Save Name + Float Threshold)
+  Goal: Save a device name (string) and a float threshold to EEPROM
+        Read them back on next boot — like saving device config
+  Components: ESP32 only
+  MEMORY LAYOUT:
+    Address 0      → marker byte (0xAB = data was saved before)
+    Address 1–20   → device name string (max 20 characters)
+    Address 21–24  → float threshold value (4 bytes)
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <EEPROM.h>
+
+#define MARKER_ADDR    0    // Magic byte — confirms data was saved
+#define NAME_ADDR      1    // Start of device name string
+#define THRESHOLD_ADDR 21   // Start of float value (4 bytes)
+#define MARKER_VALUE   0xAB // Our unique marker (any byte 1–254)
+
+// Save device name and threshold to EEPROM
+void saveSettings(String name, float threshold) {
+  // Write marker so we know settings exist on next boot
+  EEPROM.write(MARKER_ADDR, MARKER_VALUE);
+
+  // Write device name character by character
+  for (int i = 0; i < 20; i++) {
+    if (i < (int)name.length()) {
+      EEPROM.write(NAME_ADDR + i, name[i]);  // Save each character
+    } else {
+      EEPROM.write(NAME_ADDR + i, 0);  // Fill remaining bytes with 0
+    }
+  }
+
+  // .put() handles multi-byte types like float (4 bytes) automatically
+  EEPROM.put(THRESHOLD_ADDR, threshold);
+
+  bool ok = EEPROM.commit();  // Save everything to flash
+  Serial.print("Settings saved: ");
+  Serial.println(ok ? "SUCCESS" : "FAILED!");
+}
+
+// Load and print settings from EEPROM
+void loadSettings() {
+  // Reconstruct the name string from individual characters
+  String name = "";
+  for (int i = 0; i < 20; i++) {
+    char c = EEPROM.read(NAME_ADDR + i);
+    if (c == 0) break;  // Stop at null terminator
+    name += c;
+  }
+
+  // Read float using .get() — reads 4 bytes and assembles them into a float
+  float threshold;
+  EEPROM.get(THRESHOLD_ADDR, threshold);
+
+  Serial.println("=== Loaded Settings ===");
+  Serial.print("Device Name : ");
+  Serial.println(name);
+  Serial.print("Threshold   : ");
+  Serial.print(threshold);
+  Serial.println("°C");
+  Serial.println("=======================");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  EEPROM.begin(512);
+
+  Serial.println("EEPROM Settings Demo");
+
+  // Check marker byte — did we save settings before?
+  byte marker = EEPROM.read(MARKER_ADDR);
+
+  if (marker == MARKER_VALUE) {
+    // Marker found — load and display saved settings
+    Serial.println("Previous settings found! Loading...");
+    loadSettings();
+  } else {
+    // No marker — first boot, save default settings
+    Serial.println("No saved settings found. Saving defaults...");
+    saveSettings("ESP32_Node1", 35.5);
+    Serial.println("Defaults saved! Press RESET to see them load.");
+  }
+}
+
+void loop() {
+  delay(5000);
+}
+
+
+
+  ─────────────────────────────────────────────────────────────────────────────
+  CIRCUITICIAN — BE CREATIVE | MBEDX Workshop | Srijan 26
+================================================================================
