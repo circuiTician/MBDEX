@@ -1,0 +1,1284 @@
+
+================================================================================
+  MBEDX — ESP32 Embedded Systems Workshop
+  DAY 2 — All Exercise, Mini Project & Challenge Codes
+  Organized by CIRCUITICIAN x SRIJAN 26
+  Platform: PlatformIO (VS Code) | Framework: Arduino
+================================================================================
+  DAY 2 TOPICS:
+  Module 9  — Advanced Peripherals & millis()
+  Module 10 — Power Management & Deep Sleep
+  Module 11 — RTC (Internal Real Time Clock)
+  Module 12 — SPIFFS (Flash File System)
+  Module 13 — IoT & Web Server
+  BONUS     — All 3 Team Challenge Codes (The Watchdog, Vault, Reactor)
+================================================================================
+  platformio.ini base config for ALL Day 2 exercises:
+  ─────────────────────────────────────────────────
+  [env:esp32dev]
+  platform = espressif32
+  board    = esp32dev
+  framework = arduino
+  monitor_speed = 115200
+  lib_deps =
+    adafruit/DHT sensor library    ; for DHT11 exercises
+================================================================================
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 9 — Advanced Peripherals & millis() (Non-Blocking Code)
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 9.1 — millis() Multi-Tasking
+  Goal: Run 4 completely independent timed tasks SIMULTANEOUSLY with NO delay()
+  This is the most important pattern in all of embedded systems programming!
+  Components: ESP32, LED (GPIO2), Buzzer (GPIO25), Button (GPIO15)
+  KEY INSIGHT: delay() freezes your CPU. millis() lets it keep running.
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LED_PIN      2   // LED for Task 1
+#define BUZZER_PIN  25   // Buzzer for Task 2
+#define BUTTON_PIN  14   // Button for Task 3
+
+// ── Each task needs its OWN "previousMillis" variable ────────────────────────
+// Think of previousMillis as a "last time I did this" timestamp
+// We compare it with millis() (current time) to know when to act again
+
+// Task 1: Blink LED every 500ms
+unsigned long prevLED       = 0;
+bool          ledState      = false;
+
+// Task 2: Beep buzzer every 3 seconds (just a brief 50ms beep)
+unsigned long prevBuzzer    = 0;
+
+// Task 3: Print uptime every 1 second
+unsigned long prevPrint     = 0;
+
+// Task 4: Read button and print state every 100ms
+unsigned long prevButton    = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN,    OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.println("millis() Multi-Task Demo");
+  Serial.println("4 tasks running simultaneously — NO delay() used!");
+  Serial.println("──────────────────────────────────────────────────");
+}
+
+void loop() {
+  // Get the current time ONCE at the top of loop — use this everywhere
+  unsigned long now = millis();
+
+  // ── TASK 1: Blink LED every 500ms ────────────────────────────────
+  // "Has 500ms passed since I last toggled the LED?"
+  if (now - prevLED >= 500) {
+    prevLED  = now;          // Update the timestamp
+    ledState = !ledState;    // Flip the LED state
+    digitalWrite(LED_PIN, ledState);
+  }
+
+  // ── TASK 2: Brief buzzer beep every 3 seconds ────────────────────
+  if (now - prevBuzzer >= 3000) {
+    prevBuzzer = now;
+    digitalWrite(BUZZER_PIN, HIGH);
+    // NOTE: This tiny delay(50) is acceptable ONLY for a short beep
+    // For production code, use a separate timer for buzzer off too
+    delay(50);
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+
+  // ── TASK 3: Print uptime every 1 second ──────────────────────────
+  if (now - prevPrint >= 1000) {
+    prevPrint = now;
+    Serial.print("Uptime: ");
+    Serial.print(now / 1000);  // Convert ms to seconds
+    Serial.println(" seconds");
+  }
+
+  // ── TASK 4: Read button every 100ms ──────────────────────────────
+  if (now - prevButton >= 100) {
+    prevButton = now;
+    if (digitalRead(BUTTON_PIN) == LOW) {
+      Serial.println("  → Button is PRESSED!");
+    }
+  }
+
+  // Notice: There is NO delay() here!
+  // The CPU runs loop() thousands of times per second
+  // Each task "wakes up" only when its own interval has passed
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 9.2 — Hall Effect Sensor (Built-In!)
+  Goal: Read the ESP32's built-in Hall Effect sensor — no wiring needed!
+  A Hall Effect sensor detects MAGNETIC FIELDS
+  Components: ESP32 only + a magnet to test with
+  TIP: Try bringing your phone near the ESP32 chip — phones have magnets!
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Hall Effect Sensor Demo");
+  Serial.println("Bring a magnet close to the ESP32 chip (the black square)");
+  Serial.println("Watch the value change! Positive = North, Negative = South");
+  Serial.println("────────────────────────────────────────────────────────");
+}
+
+void loop() {
+  // hallRead() is a built-in ESP32 function — no library needed!
+  // It returns a signed integer:
+  //   ~0     = no magnetic field
+  //   positive = North pole detected
+  //   negative = South pole detected
+  //   larger absolute value = stronger field / closer magnet
+  int hallValue = hallRead();
+
+  Serial.print("Hall Effect Reading: ");
+  Serial.print(hallValue);
+
+  // Give a visual indication of field strength
+  if (abs(hallValue) > 50) {
+    Serial.println("  ← STRONG magnetic field detected!");
+  } else if (abs(hallValue) > 20) {
+    Serial.println("  ← Weak magnetic field nearby");
+  } else {
+    Serial.println("  (no significant field)");
+  }
+
+  delay(200);  // Update 5 times per second
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 9.3 — Capacitive Touch Pin LED Toggle
+  Goal: Touch a wire connected to GPIO4 — LED toggles ON/OFF like magic!
+  Components: ESP32, LED, 220Ω, a 15cm jumper wire as "antenna"
+  Wiring: GPIO2 → 220Ω → LED → GND
+          GPIO4 → a 15cm jumper wire (this is your touch pad!)
+  HOW IT WORKS: Your body is a large capacitor — touching the wire
+                changes the capacitance that ESP32 can measure
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define TOUCH_PIN   T0    // T0 = Touch pin 0 = GPIO 4
+#define LED_PIN      2
+
+// Threshold: below this value = touch detected
+// Typical values: ~60 when NOT touched, ~10-15 when touched
+// You may need to adjust this based on your wire length and humidity
+#define TOUCH_THRESHOLD 30
+
+bool ledState         = false;  // Current LED state
+bool lastTouchState   = false;  // Was touch active last loop?
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+
+  Serial.println("Capacitive Touch Demo");
+  Serial.println("Touch the wire on GPIO4 to toggle the LED!");
+  Serial.println("Reading → lower value = stronger touch");
+  Serial.print("Touch threshold set to: ");
+  Serial.println(TOUCH_THRESHOLD);
+}
+
+void loop() {
+  // touchRead() returns a value 0-100+
+  // Lower number = more capacitance = touch detected
+  int touchValue = touchRead(TOUCH_PIN);
+
+  bool isTouched = (touchValue < TOUCH_THRESHOLD);
+
+  // Detect the MOMENT touch starts (rising edge of touch)
+  // We only toggle on the first frame of touch — not every frame
+  if (isTouched && !lastTouchState) {
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState);
+
+    Serial.print("TOUCHED! (value=");
+    Serial.print(touchValue);
+    Serial.print(") → LED ");
+    Serial.println(ledState ? "ON" : "OFF");
+  }
+
+  lastTouchState = isTouched;
+
+  // Print raw value periodically for calibration
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 500) {
+    lastPrint = millis();
+    Serial.print("Touch raw value: ");
+    Serial.println(touchValue);
+  }
+
+  delay(20);  // Small delay for stable readings
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 10 — Power Management & Deep Sleep
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 10.1 — Timer Deep Sleep with Boot Counter
+  Goal: ESP32 blinks LED, sleeps for 10 seconds, wakes up, repeats
+        Boot counter persists across sleep cycles using RTC memory!
+  Components: ESP32, LED (GPIO2)
+  KEY CONCEPT: RTC_DATA_ATTR variables survive deep sleep — RAM does NOT!
+  REAL WORLD USE: Weather station that wakes every 15 min, reads sensor, sleeps
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+
+#define LED_PIN 2
+
+// RTC_DATA_ATTR stores this variable in the RTC memory domain
+// RTC memory is the ONLY memory that survives deep sleep
+// Regular variables (int, bool, etc.) are LOST during deep sleep!
+RTC_DATA_ATTR int bootCount = 0;  // Persists across sleep cycles
+
+// How long to sleep (in microseconds)
+// 10 seconds = 10 × 1,000,000 = 10,000,000 microseconds
+#define SLEEP_DURATION_US  10000000ULL  // ULL = unsigned long long
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);  // Brief delay for Serial to connect
+
+  // Increment boot count every wake-up
+  bootCount++;
+
+  // Print wake-up reason for debugging
+  esp_sleep_wakeup_cause_t wakeReason = esp_sleep_get_wakeup_cause();
+
+  Serial.println("===========================");
+  Serial.print("Boot #");
+  Serial.println(bootCount);
+
+  if (wakeReason == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("Woke up: TIMER expired");
+  } else {
+    Serial.println("Woke up: POWER ON or RESET");
+  }
+
+  // Do your "active work" here ─────────────────────────────────────
+  // In a real sensor node, you'd read sensors and send data here
+
+  // Blink LED 3 times to show we're awake
+  pinMode(LED_PIN, OUTPUT);
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
+    delay(200);
+  }
+
+  Serial.print("Active work done. Sleeping for ");
+  Serial.print(SLEEP_DURATION_US / 1000000);
+  Serial.println(" seconds...");
+  Serial.println("===========================");
+
+  // POWER MATH REMINDER:
+  // Active mode:    ~240mA for 1-2 seconds
+  // Deep sleep:     ~0.01mA for 10 seconds
+  // Average current ≈ 2.4mA → 2000mAh battery lasts ~34 days!
+
+  // Configure the timer wakeup source
+  esp_sleep_enable_timer_wakeup(SLEEP_DURATION_US);
+
+  // Enter deep sleep — CPU stops here, resumes at setup() after waking
+  esp_deep_sleep_start();
+
+  // Code below here NEVER runs (deep sleep resets the chip)
+}
+
+void loop() {
+  // loop() is never reached in this program
+  // Deep sleep jumps directly back to setup() on wakeup
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 10.2 — GPIO Button Wakeup from Deep Sleep (EXT0)
+  Goal: ESP32 sleeps until you press a button — then reads DHT11 and sleeps again
+  This is exactly how smart door sensors and IoT button devices work!
+  Components: ESP32, push button, DHT11 sensor
+  Wiring: Button → GPIO15 → GND (with INPUT_PULLUP)
+          DHT11 DATA → GPIO4
+  platformio.ini lib_deps: adafruit/DHT sensor library
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <DHT.h>
+
+#define BUTTON_PIN  14   // Wakeup button — must be RTC GPIO (0,2,4,12-15,25-27,32-39)
+#define DHT_PIN      4
+#define DHT_TYPE     DHT11
+
+// RTC memory — survives deep sleep
+RTC_DATA_ATTR int wakeCount = 0;
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  wakeCount++;
+
+  // Find out WHY we woke up
+  esp_sleep_wakeup_cause_t reason = esp_sleep_get_wakeup_cause();
+
+  Serial.println("─────────────────────────────");
+  Serial.print("Wake event #");
+  Serial.println(wakeCount);
+
+  if (reason == ESP_SLEEP_WAKEUP_EXT0) {
+    // Woke up because the button was pressed!
+    Serial.println("Woke up: BUTTON PRESSED (EXT0)");
+
+    // Read DHT11 sensor
+    dht.begin();
+    delay(2000);  // DHT11 needs 2 seconds to stabilize after power-up
+
+    float temp = dht.readTemperature();
+    float hum  = dht.readHumidity();
+
+    if (!isnan(temp) && !isnan(hum)) {
+      Serial.print("Temperature: ");
+      Serial.print(temp);
+      Serial.print("°C  |  Humidity: ");
+      Serial.print(hum);
+      Serial.println("%");
+    } else {
+      Serial.println("Sensor read error!");
+    }
+  } else {
+    Serial.println("Woke up: POWER ON or RESET (first boot)");
+  }
+
+  Serial.println("Going back to deep sleep...");
+  Serial.println("Press button to wake again!");
+  Serial.println("─────────────────────────────");
+  delay(100);  // Allow Serial to finish printing
+
+  // Configure GPIO15 as wakeup source
+  // EXT0 = External wakeup on a SINGLE GPIO pin
+  // ESP_EXT1_WAKEUP_ALL_LOW = wake when GPIO15 goes LOW (button press)
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)BUTTON_PIN, 0);  // 0 = LOW level wakes
+
+  // Enter deep sleep — waiting for button press
+  esp_deep_sleep_start();
+}
+
+void loop() {
+  // Never reached
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 11 — RTC (Real Time Clock — Internal NTP Sync)
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 11.1 — Log DHT11 Readings with Timestamp
+  Goal: Print sensor data WITH date and time from NTP server
+  Format: "2025/03/08 14:32:05 | Temp: 28.4°C | Hum: 62%"
+  Components: ESP32, DHT11
+  IMPORTANT: Replace "WorkshopSSID" and "password" with actual Wi-Fi details!
+  platformio.ini lib_deps: adafruit/DHT sensor library
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>      // Built-in Wi-Fi library
+#include "time.h"      // Built-in time functions — no extra library needed!
+#include <DHT.h>
+
+// ── Wi-Fi credentials — CHANGE THESE ──────────────────────────────────────
+const char* WIFI_SSID     = "WorkshopSSID";  // Your Wi-Fi network name
+const char* WIFI_PASSWORD = "password";       // Your Wi-Fi password
+
+// ── NTP (Network Time Protocol) settings ──────────────────────────────────
+// NTP is a time server on the internet — gives us accurate current time
+const char* NTP_SERVER    = "pool.ntp.org";  // Public time server
+
+// GMT Offset: India Standard Time = UTC + 5:30 = 5×3600 + 30×60 = 19800 seconds
+// Change this for your timezone:
+//   UTC+0 (UK)     = 0
+//   UTC+5:30 (IST) = 19800
+//   UTC+8 (CST)    = 28800
+const long  GMT_OFFSET_SEC   = 19800;  // IST = UTC+5:30
+const int   DAYLIGHT_OFFSET  = 0;     // India has no daylight saving time
+
+#define DHT_PIN  4
+DHT dht(DHT_PIN, DHT11);
+
+void connectWiFi() {
+  Serial.print("Connecting to Wi-Fi: ");
+  Serial.print(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  // Wait until connected — print dots to show progress
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println(" Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void syncTime() {
+  // configTime() tells ESP32 how to sync with NTP server
+  // After this call, ESP32 automatically fetches current time over Wi-Fi
+  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET, NTP_SERVER);
+
+  Serial.print("Syncing time from NTP");
+
+  // Wait for time to be synced (year becomes valid — not 1970)
+  struct tm timeinfo;
+  while (!getLocalTime(&timeinfo) || timeinfo.tm_year < 100) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println(" Time synced!");
+}
+
+// Returns a formatted timestamp string like "2025/03/08 14:32:05"
+String getTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "TIME_ERROR";
+  }
+
+  // sprintf formats the time into a string with zero-padding
+  char buffer[25];
+  sprintf(buffer, "%04d/%02d/%02d %02d:%02d:%02d",
+    timeinfo.tm_year + 1900,  // tm_year counts from 1900
+    timeinfo.tm_mon  + 1,     // tm_mon is 0-11, so add 1
+    timeinfo.tm_mday,
+    timeinfo.tm_hour,
+    timeinfo.tm_min,
+    timeinfo.tm_sec
+  );
+  return String(buffer);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  dht.begin();
+  connectWiFi();
+  syncTime();
+
+  Serial.println("Starting timestamped DHT11 logging...");
+  Serial.println("─────────────────────────────────────────────────────────");
+}
+
+void loop() {
+  delay(2000);  // DHT11 needs 2 seconds between readings
+
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Sensor error — check wiring!");
+    return;
+  }
+
+  // Build the log entry in the required format
+  String timestamp = getTimestamp();
+
+  Serial.print(timestamp);
+  Serial.print(" | Temp: ");
+  Serial.print(temp);
+  Serial.print("°C | Hum: ");
+  Serial.print(hum);
+  Serial.println("%");
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 11.2 — Buzzer Alarm at Specific Time
+  Goal: Trigger buzzer when clock reaches a specific hour and minute
+  Components: ESP32, buzzer (GPIO25), Wi-Fi
+  CHANGE the target hour and minute in the #define below!
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include "time.h"
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+const char* NTP_SERVER    = "pool.ntp.org";
+const long  GMT_OFFSET_SEC = 19800;
+const int   DAYLIGHT_OFFSET = 0;
+
+#define BUZZER_PIN    25
+
+// ── SET YOUR ALARM TIME HERE ──────────────────────────────────────────────
+#define ALARM_HOUR   14   // 24-hour format: 14 = 2:00 PM
+#define ALARM_MINUTE 30   // 30 = :30 → alarm at 14:30 (2:30 PM)
+
+bool alarmFired = false;  // Prevent alarm from repeating every second
+
+void connectAndSync() {
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println(" Connected!");
+  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET, NTP_SERVER);
+  struct tm t;
+  while (!getLocalTime(&t) || t.tm_year < 100) { delay(500); }
+  Serial.println("Time synced!");
+}
+
+void triggerAlarm() {
+  Serial.println("⏰ ALARM! Buzzing now...");
+  // Buzz 5 times
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(300);
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(200);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  pinMode(BUZZER_PIN, OUTPUT);
+  connectAndSync();
+
+  Serial.print("Alarm set for ");
+  Serial.print(ALARM_HOUR);
+  Serial.print(":");
+  if (ALARM_MINUTE < 10) Serial.print("0");
+  Serial.println(ALARM_MINUTE);
+}
+
+void loop() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Time error");
+    delay(1000);
+    return;
+  }
+
+  // Print current time every 10 seconds
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 10000) {
+    lastPrint = millis();
+    Serial.printf("Current time: %02d:%02d:%02d\n",
+      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  }
+
+  // Check if it's alarm time
+  // tm_hour and tm_min come from the struct tm object
+  if (timeinfo.tm_hour == ALARM_HOUR &&
+      timeinfo.tm_min  == ALARM_MINUTE &&
+      !alarmFired) {
+
+    triggerAlarm();
+    alarmFired = true;  // Only fire once per minute
+  }
+
+  // Reset alarmFired when minute changes
+  if (timeinfo.tm_min != ALARM_MINUTE) {
+    alarmFired = false;
+  }
+
+  delay(1000);  // Check every second
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 12 — SPIFFS (Flash File System)
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 12.1 — Write and Read a Config File
+  Goal: Write settings to /config.txt on flash, read them back on boot
+  Think of SPIFFS like a tiny SD card built into the ESP32!
+  Components: ESP32 only
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <SPIFFS.h>  // Built-in SPIFFS library
+
+void writeConfig() {
+  // Open file for WRITING ("w" mode)
+  // If file exists it will be OVERWRITTEN
+  // Path MUST start with "/" — SPIFFS is a flat system (no folders)
+  File file = SPIFFS.open("/config.txt", "w");
+
+  if (!file) {
+    Serial.println("ERROR: Could not open /config.txt for writing!");
+    return;
+  }
+
+  // Write lines to the file — just like Serial.println()!
+  file.println("threshold=35");
+  file.println("name=ESP32_Node1");
+  file.println("interval=5000");
+  file.println("location=Lab_Room_A");
+
+  file.close();  // ALWAYS close the file when done!
+  Serial.println("Config written to /config.txt successfully!");
+}
+
+void readConfig() {
+  // Open file for READING ("r" mode)
+  File file = SPIFFS.open("/config.txt", "r");
+
+  if (!file) {
+    Serial.println("ERROR: Could not open /config.txt for reading!");
+    return;
+  }
+
+  Serial.println("── Contents of /config.txt ──");
+
+  // Read line by line until end of file
+  while (file.available()) {
+    // readStringUntil('\n') reads one line at a time
+    String line = file.readStringUntil('\n');
+    line.trim();  // Remove any extra whitespace or \r characters
+    Serial.println("  " + line);
+  }
+
+  file.close();
+  Serial.println("─────────────────────────────");
+}
+
+void listAllFiles() {
+  // Open root directory to list all files
+  File root = SPIFFS.open("/");
+  File entry = root.openNextFile();
+
+  Serial.println("── All files on SPIFFS ──");
+  if (!entry) {
+    Serial.println("  (no files found)");
+  }
+
+  while (entry) {
+    Serial.print("  ");
+    Serial.print(entry.name());    // File path like "/config.txt"
+    Serial.print("  —  ");
+    Serial.print(entry.size());    // File size in bytes
+    Serial.println(" bytes");
+    entry = root.openNextFile();
+  }
+  Serial.println("─────────────────────────");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // SPIFFS.begin(true) — true = FORMAT if SPIFFS is not initialized
+  // Only formats on very first use — safe to keep true
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS mount FAILED! Check board settings.");
+    return;
+  }
+
+  Serial.println("SPIFFS mounted OK!");
+  Serial.print("Total space: ");
+  Serial.print(SPIFFS.totalBytes() / 1024);
+  Serial.println(" KB");
+  Serial.print("Used space:  ");
+  Serial.print(SPIFFS.usedBytes() / 1024);
+  Serial.println(" KB");
+  Serial.println();
+
+  writeConfig();    // Write the config file
+  readConfig();     // Read it back to verify
+  listAllFiles();   // Show all files on flash
+}
+
+void loop() {
+  delay(5000);
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 12.2 — Log DHT11 Readings to CSV File
+  Goal: Log sensor data with timestamps to /log.csv on SPIFFS flash
+  After logging, you can read the entire CSV and see all historical data!
+  Components: ESP32, DHT11
+  platformio.ini lib_deps: adafruit/DHT sensor library
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <SPIFFS.h>
+#include <DHT.h>
+
+#define DHT_PIN  4
+DHT dht(DHT_PIN, DHT11);
+
+int logEntry = 0;              // Count log entries
+const int MAX_ENTRIES = 20;   // Stop logging after this many entries
+
+// Simulated timestamp counter (in real use, pair with RTC module)
+// Format: minutes:seconds since start
+String getSimpleTimestamp() {
+  unsigned long ms = millis();
+  int seconds = (ms / 1000) % 60;
+  int minutes = (ms / 60000);
+  char buf[10];
+  sprintf(buf, "%02d:%02d", minutes, seconds);
+  return String(buf);
+}
+
+void appendToLog(float temp, float hum) {
+  // Open file in APPEND mode ("a") — adds to end without erasing
+  // Use "w" to overwrite from scratch
+  File file = SPIFFS.open("/log.csv", "a");
+
+  if (!file) {
+    Serial.println("Log file open failed!");
+    return;
+  }
+
+  // Write one CSV row: timestamp, temperature, humidity
+  file.print(getSimpleTimestamp());
+  file.print(",");
+  file.print(temp);
+  file.print(",");
+  file.println(hum);
+
+  file.close();
+  logEntry++;
+}
+
+void printFullLog() {
+  File file = SPIFFS.open("/log.csv", "r");
+  if (!file) {
+    Serial.println("Cannot read log file!");
+    return;
+  }
+
+  Serial.println("══ Full Log (/log.csv) ══════════════════");
+  Serial.println("Timestamp , Temp(°C) , Hum(%)");
+  Serial.println("─────────────────────────────────────────");
+
+  while (file.available()) {
+    Serial.println(file.readStringUntil('\n'));
+  }
+
+  file.close();
+  Serial.println("═════════════════════════════════════════");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  dht.begin();
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS mount failed!");
+    return;
+  }
+
+  // Write CSV header if file doesn't exist yet
+  if (!SPIFFS.exists("/log.csv")) {
+    File f = SPIFFS.open("/log.csv", "w");
+    f.println("Timestamp,Temperature_C,Humidity_Pct");  // CSV header row
+    f.close();
+    Serial.println("Created /log.csv with header");
+  }
+
+  Serial.println("DHT11 CSV Logger ready!");
+  Serial.print("Will log ");
+  Serial.print(MAX_ENTRIES);
+  Serial.println(" readings then print full log.");
+}
+
+void loop() {
+  if (logEntry >= MAX_ENTRIES) {
+    // Done logging — print the full CSV and stop
+    printFullLog();
+    Serial.println("Logging complete. Halting.");
+    while (true) delay(1000);  // Stop here
+  }
+
+  delay(2000);  // DHT11 minimum 2s between reads
+
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("Sensor read error!");
+    return;
+  }
+
+  appendToLog(temp, hum);
+
+  Serial.print("Logged entry #");
+  Serial.print(logEntry);
+  Serial.print(" → ");
+  Serial.print(getSimpleTimestamp());
+  Serial.print(" | ");
+  Serial.print(temp);
+  Serial.print("°C | ");
+  Serial.print(hum);
+  Serial.println("%");
+}
+
+
+════════════════════════════════════════════════════════════════════════════════
+  MODULE 13 — IoT & Web Server
+  All exercises in this module require Wi-Fi
+  Replace "WorkshopSSID" / "password" with real credentials
+════════════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 13.1 — Connect to Wi-Fi and Get IP Address
+  Goal: Connect to Wi-Fi network, print the IP address
+        Then open that IP in your phone browser!
+  Components: ESP32 only
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("Connecting to Wi-Fi...");
+
+  // WiFi.begin() starts the connection process
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  // Wait until connected — this can take 2-5 seconds
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("Wi-Fi Connected!");
+  Serial.println("─────────────────────────────");
+  Serial.print("Network:    ");
+  Serial.println(WiFi.SSID());         // Which network are we on?
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());      // Our IP — type this in phone browser!
+  Serial.print("Signal Strength: ");
+  Serial.print(WiFi.RSSI());           // Signal strength in dBm
+  Serial.println(" dBm");
+  Serial.println("─────────────────────────────");
+  Serial.println("Open your phone browser and type the IP address above!");
+}
+
+void loop() {
+  // Keep connection alive — nothing needed here
+  delay(10000);
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 13.2 — Serve a Web Page from ESP32
+  Goal: ESP32 acts as a tiny web server — phone browser shows a webpage
+  Components: ESP32 only
+  HOW TO TEST: Open Serial Monitor → find IP address → type in phone browser
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>  // Built-in ESP32 web server library
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+
+// Create a web server on port 80 (standard HTTP port)
+// Port 80 = the default — no need to type :80 in browser
+WebServer server(80);
+
+// This function runs when browser visits http://[IP]/
+void handleRoot() {
+  // HTML is just a string we send to the browser
+  // The browser interprets it and renders the page
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<title>ESP32 Workshop</title>";
+  html += "<style>";
+  html += "  body { font-family: Arial; background: #0a0f2c; color: white; text-align: center; padding: 40px; }";
+  html += "  h1 { color: #12bfff; font-size: 2.5em; }";
+  html += "  p  { font-size: 1.2em; color: #ccc; }";
+  html += "</style></head><body>";
+  html += "<h1>Hello from ESP32!</h1>";
+  html += "<p>Your ESP32 is running as a web server.</p>";
+  html += "<p>Uptime: <b>" + String(millis() / 1000) + " seconds</b></p>";
+  html += "</body></html>";
+
+  // send(statusCode, contentType, body)
+  server.send(200, "text/html", html);
+}
+
+// This runs when browser visits any URL that doesn't have a handler
+void handleNotFound() {
+  server.send(404, "text/plain", "404 - Page not found!");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+
+  Serial.println("\nWi-Fi connected!");
+  Serial.print("Open in browser: http://");
+  Serial.println(WiFi.localIP());
+
+  // Register URL handlers
+  server.on("/", handleRoot);         // Handle the root URL
+  server.onNotFound(handleNotFound);  // Handle unknown URLs
+
+  server.begin();  // Start the server
+  Serial.println("Web server started!");
+}
+
+void loop() {
+  // handleClient() MUST be called in every loop — it processes incoming requests
+  // Without this, the server won't respond to any browser requests!
+  server.handleClient();
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 13.3 — Live Sensor Dashboard (Auto-Refresh)
+  Goal: Web page shows live Temp, Humidity, Light level — auto-refreshes every 3s
+  Components: ESP32, DHT11, LDR + 10kΩ resistor
+  Wiring: DHT11→GPIO4, LDR→GPIO34
+  platformio.ini lib_deps: adafruit/DHT sensor library
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+
+#define DHT_PIN  4
+#define LDR_PIN  34
+
+DHT dht(DHT_PIN, DHT11);
+WebServer server(80);
+
+void handleDashboard() {
+  // Read sensors right before building the page
+  float temp = dht.readTemperature();
+  float hum  = dht.readHumidity();
+  int   ldrRaw = analogRead(LDR_PIN);
+  int   light  = map(ldrRaw, 0, 4095, 0, 100);
+
+  // Determine color based on temperature
+  String tempColor = (temp > 35) ? "#ff4444" : (temp > 25) ? "#ffaa00" : "#44ff88";
+
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<title>ESP32 Live Dashboard</title>";
+  // meta refresh = auto-reload page every 3 seconds
+  html += "<meta http-equiv='refresh' content='3'>";
+  html += "<style>";
+  html += "  body { font-family: Arial; background: #0a0f2c; color: white; padding: 20px; }";
+  html += "  h1   { color: #12bfff; }";
+  html += "  .card { background: #1a2550; border: 1px solid #12bfff; border-radius: 10px;";
+  html += "          padding: 20px; margin: 10px; display: inline-block; min-width: 150px; }";
+  html += "  .value { font-size: 2.5em; font-weight: bold; }";
+  html += "  .label { color: #aaa; font-size: 0.9em; margin-top: 5px; }";
+  html += "</style></head><body>";
+  html += "<h1>ESP32 Live Dashboard</h1>";
+  html += "<p style='color:#aaa'>Auto-refreshes every 3 seconds</p>";
+
+  // Temperature card
+  html += "<div class='card'>";
+  html += "<div class='value' style='color:" + tempColor + "'>" + String(temp, 1) + "°C</div>";
+  html += "<div class='label'>Temperature</div></div>";
+
+  // Humidity card
+  html += "<div class='card'>";
+  html += "<div class='value' style='color:#12bfff'>" + String(hum, 1) + "%</div>";
+  html += "<div class='label'>Humidity</div></div>";
+
+  // Light level card
+  html += "<div class='card'>";
+  html += "<div class='value' style='color:#ffd700'>" + String(light) + "%</div>";
+  html += "<div class='label'>Light Level</div></div>";
+
+  html += "<p style='color:#555; font-size:0.8em'>Uptime: ";
+  html += String(millis() / 1000) + "s</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\nConnected! Dashboard at: http://" + WiFi.localIP().toString());
+
+  server.on("/", handleDashboard);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 13.4 — Remote Hardware Control from Browser
+  Goal: Click buttons in your browser → LED turns on/off, buzzer beeps!
+  Components: ESP32, LED, buzzer
+  Wiring: LED→GPIO2, Buzzer→GPIO25
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+
+#define LED_PIN    2
+#define BUZZER_PIN 25
+
+WebServer server(80);
+
+// Main control page with buttons
+void handleRoot() {
+  String html = "<!DOCTYPE html><html><head><title>ESP32 Control</title>";
+  html += "<style>";
+  html += "  body  { font-family: Arial; background: #0a0f2c; color: white; text-align: center; padding: 30px; }";
+  html += "  h1    { color: #12bfff; }";
+  html += "  .btn  { padding: 15px 30px; margin: 10px; font-size: 1.2em;";
+  html += "          border: none; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; }";
+  html += "  .on   { background: #12bfff; color: black; }";
+  html += "  .off  { background: #555; color: white; }";
+  html += "  .buzz { background: #ffd700; color: black; }";
+  html += "</style></head><body>";
+  html += "<h1>ESP32 Remote Control</h1>";
+
+  // These are links — clicking them sends a GET request to the URL
+  html += "<a href='/led/on'  class='btn on' >LED ON</a>";
+  html += "<a href='/led/off' class='btn off'>LED OFF</a>";
+  html += "<a href='/buzz'    class='btn buzz'>BUZZ!</a>";
+
+  html += "<br><br><p style='color:#aaa'>Click a button to control hardware!</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+
+// Handle LED ON command
+void handleLEDOn() {
+  digitalWrite(LED_PIN, HIGH);
+  Serial.println("Browser command: LED ON");
+  // Redirect back to main page after action
+  server.sendHeader("Location", "/");
+  server.send(303);  // 303 = "See Other" (redirect)
+}
+
+// Handle LED OFF command
+void handleLEDOff() {
+  digitalWrite(LED_PIN, LOW);
+  Serial.println("Browser command: LED OFF");
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+// Handle Buzzer command
+void handleBuzz() {
+  Serial.println("Browser command: BUZZ");
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(300);
+  digitalWrite(BUZZER_PIN, LOW);
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\nConnected! Control page: http://" + WiFi.localIP().toString());
+
+  // Register all URL routes
+  server.on("/",        handleRoot);    // Main page
+  server.on("/led/on",  handleLEDOn);   // LED ON
+  server.on("/led/off", handleLEDOff);  // LED OFF
+  server.on("/buzz",    handleBuzz);    // Buzzer
+
+  server.begin();
+  Serial.println("Control server started!");
+}
+
+void loop() {
+  server.handleClient();
+}
+
+
+────────────────────────────────────────────────────────────────────────────────
+  EXERCISE 13.5 — Complete IoT Dashboard (All-In-One)
+  Goal: Full dashboard combining live sensors + remote control + uptime + status
+  Components: ESP32, DHT11, LDR, LED, Buzzer
+  Wiring: DHT11→GPIO4, LDR→GPIO34, LED→GPIO2, Buzzer→GPIO25
+  platformio.ini lib_deps: adafruit/DHT sensor library
+────────────────────────────────────────────────────────────────────────────────
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+
+const char* WIFI_SSID     = "WorkshopSSID";
+const char* WIFI_PASSWORD = "password";
+
+#define DHT_PIN    4
+#define LDR_PIN    34
+#define LED_PIN     2
+#define BUZZER_PIN 25
+
+DHT dht(DHT_PIN, DHT11);
+WebServer server(80);
+
+void handleDashboard() {
+  float temp   = dht.readTemperature();
+  float hum    = dht.readHumidity();
+  int   light  = map(analogRead(LDR_PIN), 0, 4095, 0, 100);
+  bool  ledOn  = digitalRead(LED_PIN);
+
+  // Determine alert status
+  bool alert = (temp > 35 || light < 20);
+  String status     = alert ? "ALERT" : "NORMAL";
+  String statusColor = alert ? "#ff4444" : "#44ff88";
+
+  // Uptime via millis()
+  unsigned long upSec = millis() / 1000;
+  String uptime = String(upSec / 3600) + "h " +
+                  String((upSec % 3600) / 60) + "m " +
+                  String(upSec % 60) + "s";
+
+  String html = "<!DOCTYPE html><html><head><title>ESP32 IoT Dashboard</title>";
+  html += "<meta http-equiv='refresh' content='3'>";
+  html += "<style>";
+  html += "body{font-family:Arial;background:#0a0f2c;color:white;padding:15px;margin:0}";
+  html += "h1{color:#12bfff;margin-bottom:5px}";
+  html += ".grid{display:flex;flex-wrap:wrap;gap:10px;margin:15px 0}";
+  html += ".card{background:#1a2550;border:1px solid #12bfff;border-radius:10px;padding:15px;min-width:120px;text-align:center}";
+  html += ".val{font-size:2em;font-weight:bold}";
+  html += ".lbl{color:#aaa;font-size:0.8em;margin-top:5px}";
+  html += ".btn{padding:12px 20px;margin:5px;font-size:1em;border:none;border-radius:6px;cursor:pointer;text-decoration:none;display:inline-block}";
+  html += ".on{background:#12bfff;color:#000}.off{background:#555;color:#fff}.bz{background:#ffd700;color:#000}";
+  html += ".status{padding:10px;border-radius:8px;font-size:1.3em;font-weight:bold;margin:10px 0}";
+  html += "</style></head><body>";
+
+  html += "<h1>ESP32 IoT Dashboard</h1>";
+
+  // Status indicator
+  html += "<div class='status' style='background:" + statusColor + "20;border:2px solid" + statusColor + ";color:" + statusColor + "'>";
+  html += "System Status: " + status + "</div>";
+
+  // Sensor cards
+  html += "<div class='grid'>";
+  html += "<div class='card'><div class='val' style='color:#ff6644'>" + String(temp,1) + "°C</div><div class='lbl'>Temperature</div></div>";
+  html += "<div class='card'><div class='val' style='color:#12bfff'>" + String(hum,1) + "%</div><div class='lbl'>Humidity</div></div>";
+  html += "<div class='card'><div class='val' style='color:#ffd700'>" + String(light) + "%</div><div class='lbl'>Light</div></div>";
+  html += "<div class='card'><div class='val' style='color:#aaa'>" + uptime + "</div><div class='lbl'>Uptime</div></div>";
+  html += "</div>";
+
+  // Control buttons
+  html += "<div>";
+  html += "<a href='/led/on'  class='btn on' >LED ON</a>";
+  html += "<a href='/led/off' class='btn off'>LED OFF</a>";
+  html += "<a href='/buzz'    class='btn bz'>BUZZ!</a>";
+  html += "</div>";
+
+  html += "<p style='color:#555;font-size:0.8em;margin-top:20px'>Auto-refreshes every 3s</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+
+void handleLEDOn()  { digitalWrite(LED_PIN, HIGH); Serial.println("LED ON");  server.sendHeader("Location","/"); server.send(303); }
+void handleLEDOff() { digitalWrite(LED_PIN, LOW);  Serial.println("LED OFF"); server.sendHeader("Location","/"); server.send(303); }
+void handleBuzz()   {
+  digitalWrite(BUZZER_PIN, HIGH); delay(200); digitalWrite(BUZZER_PIN, LOW);
+  Serial.println("BUZZ!");
+  server.sendHeader("Location","/"); server.send(303);
+}
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\nConnected! Dashboard: http://" + WiFi.localIP().toString());
+
+  server.on("/",        handleDashboard);
+  server.on("/led/on",  handleLEDOn);
+  server.on("/led/off", handleLEDOff);
+  server.on("/buzz",    handleBuzz);
+  server.begin();
+  Serial.println("Complete IoT dashboard running!");
+}
+
+void loop() {
+  server.handleClient();
+}
+
+
+
+
+================================================================================
+  END OF DAY 2 CODES
+  ─────────────────────────────────────────────────────────────────────────────
+  TOTAL COUNT:
+  Module 9  (millis)     : 3 exercises
+  Module 10 (Deep Sleep) : 2 exercises
+  Module 11 (RTC)        : 2 exercises
+  Module 12 (SPIFFS)     : 2 exercises
+  Module 13 (IoT Server) : 5 exercises
+  Challenge 1 (Watchdog) : 1 full solution
+  Challenge 2 (Vault)    : 1 full solution
+  Challenge 3 (Reactor)  : 1 full solution
+  ─────────────────────────────────────────────────────────────────────────────
+  Grand Total Day 2: 16 exercise codes + 3 challenge codes = 19 files
+  ─────────────────────────────────────────────────────────────────────────────
+  WHAT TO DO NEXT:
+  → Run each exercise in order — don't skip ahead
+  → For challenges: close all notes, start a new file, code from memory
+  → After the workshop: explore FreeRTOS, MQTT, ESP-IDF full framework
+  ─────────────────────────────────────────────────────────────────────────────
+  CIRCUITICIAN — BE CREATIVE
+  MBEDX Workshop | Srijan 26
+================================================================================
